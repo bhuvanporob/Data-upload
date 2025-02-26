@@ -122,6 +122,15 @@ def main():
                     pivotdf["INV_per"] = round(pivotdf["Invalid"] / pivotdf["All"] * 100, 2)
                 dataframes[key] = pivotdf
                 st.dataframe(pivotdf)
+
+                pivotdf = pivotdf[pivotdf[index_columns[key][0]] != 'All']  # Remove rows where index is 'All'
+                    
+                    # Interactive graphs for each index column
+                for index in index_columns[key]:
+                    if index in pivotdf.columns and "INV_per" in pivotdf.columns:
+                        avg_inv_per = pivotdf.groupby(index)["INV_per"].mean().reset_index()
+                        fig = px.bar(avg_inv_per, x=index, y="INV_per", title=f"AVG INV_per Analysis - {key} ({index})")
+                        st.plotly_chart(fig)
         
         excel_file = generate_excel(dataframes)
         st.sidebar.download_button(
