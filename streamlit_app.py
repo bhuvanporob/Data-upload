@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.figure_factory as ff
 from io import BytesIO
 from openpyxl.styles import PatternFill, Font, Border, Side
 import datetime as dt
@@ -160,14 +161,43 @@ def main():
                     st.warning("Column 'All' not found in pivot table. Check data consistency.")
 
                 st.dataframe(pivotdf)
+                
+        # Create tabs
+        inv_tab, ct_tab = st.tabs(["INV_per", "Ct values"])
 
-                # Interactive graphs for each index column
-                for index in index_columns[key]:
-                    if index in pivotdf.columns and "INV_per" in pivotdf.columns:
-                        avg_inv_per = pivotdf.groupby(index)["INV_per"].mean().reset_index()
-                        fig = px.bar(avg_inv_per, x=index, y="INV_per", title=f"AVG INV_per Analysis - {key} ({index})")
-                        st.plotly_chart(fig)
-        
+        with inv_tab:
+            # Define the columns to visualize
+            columns_to_view = ['Zone', 'State', 'Account Owner', 'Customer Type', 'Lab_name', 
+                            'Truelab_id', 'Lot', 'Chip_batchno', 'Chip_serial_no']
+
+            # Loop through the specified columns
+            for column in columns_to_view:
+                if column in pivotdf.columns and "INV_per" in pivotdf.columns:
+                    avg_inv_per = pivotdf.groupby(column)["INV_per"].mean().reset_index()
+                    fig = px.bar(avg_inv_per, x=column, y="INV_per", title=f"AVG INV_per Analysis - {column}")
+                    st.plotly_chart(fig, use_container_width=True)
+        # Content for "Ct values" tab
+        with ct_tab:
+            # Convert Ct1, Ct2, Ct3 to numeric and replace non-numeric values with 0
+            for i, col in zip(range(5, 9), ["Ct1", "Ct2", "Ct3"]):
+                filtered_df[col] = pd.to_numeric(filtered_df[col], errors="coerce").fillna(0)
+
+            # Create separate bell curves for Ct1, Ct2, and Ct3
+            ct_columns = ["Ct1", "Ct2", "Ct3"]
+            for ct_col in ct_columns:
+                ct_values = filtered_df[filtered_df[ct_col] >= 10][ct_col]  # Filter values starting from 10
+
+                # Create a histogram with KDE line
+                fig = px.histogram(ct_values, x=ct_values, nbins=50, marginal="violin", opacity=0.7)
+                
+                # Update layout
+                fig.update_layout(title=f"Bell Curve Distribution of {ct_col}",
+                                xaxis_title=f"{ct_col} Values",
+                                yaxis_title="Frequency",
+                                template="plotly_white")
+
+                # Show plot in Streamlit with a unique key
+                st.plotly_chart(fig, key=f'key_{ct_col}_{i}')  # Ensure unique key for each chart
         excel_file = generate_excel(dataframes)
         st.sidebar.download_button("📥 Download Excel File", data=excel_file, file_name="data_export.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
