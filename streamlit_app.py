@@ -3,10 +3,7 @@ import pandas as pd
 import plotly.express as px
 from io import BytesIO
 from openpyxl.styles import PatternFill, Font, Border, Side
-
-PARAMETER_OPTIONS = [
-    "AFC", "BRU", "CAL", "CHV", "CLA", "CMV", "COO", "COV", "DCV", "DEN", "H12", "H1N", "H3N", "HAV", "HBV", "HCV", "HEV", "HIV", "HLB", "HPV", "HSV", "IAB", "LTS", "MAL", "MBL", "MGM", "MIS", "MMY", "MTB", "MTI", "MTR", "MTU", "NGC", "RBS", "STY", "TPC", "TYP"
-]
+import datetime as dt
 
 def apply_excel_formatting(writer, sheet_name, df):
     workbook = writer.book
@@ -39,12 +36,12 @@ def apply_excel_formatting(writer, sheet_name, df):
 
     inv_col_idx = None
     for col_idx, cell in enumerate(worksheet[1], start=1):
-        if cell.value == "INV_per":
+        if cell.value in ["INV_per", "IND_per"]:
             inv_col_idx = col_idx
             break
 
     if inv_col_idx:
-        for row_idx, value in enumerate(df["INV_per"], start=2):
+        for row_idx, value in enumerate(df["INV_per" if "INV_per" in df.columns else "IND_per"], start=2):
             cell = worksheet.cell(row=row_idx, column=inv_col_idx)
             if isinstance(value, (int, float)):
                 if value > 7:
@@ -95,13 +92,49 @@ def main():
 
         st.sidebar.header("Filters")
         start_date = st.sidebar.date_input("Start Date", combined_df["Test_date_time"].min())
-        end_date = st.sidebar.date_input("End Date", combined_df["Test_date_time"].max())
-        selected_parameters = st.sidebar.multiselect("Select Parameters", PARAMETER_OPTIONS)
-
+        end_date = st.sidebar.date_input("End Date", (combined_df["Test_date_time"].max() + dt.timedelta(days=1)).date())
+        # selected_parameters = st.sidebar.multiselect("Select Parameters",combined_df["Profile_id"].dropna().unique())
+        
         filtered_df = combined_df[(combined_df['Test_date_time'] >= pd.to_datetime(start_date)) &
-                                  (combined_df['Test_date_time'] <= pd.to_datetime(end_date)) &
-                                  (combined_df['Profile_id'].isin(selected_parameters))]
+                                  (combined_df['Test_date_time'] <= pd.to_datetime(end_date))]
+        # for parameter
+        filtered_df["Profile_id"] = filtered_df["Profile_id"].astype(str)
+        all_parameters = sorted(filtered_df["Profile_id"].dropna().unique().tolist())
+        all_parameters.insert(0, "All parameters")
+        selected_parameters = st.sidebar.multiselect("Select parameters", all_parameters, default=["All parameters"])
+        if "All parameters" in selected_parameters:
+            selected_parameters = all_parameters[1:]  # Exclude "All lots" from the selection
+        filtered_df = filtered_df[filtered_df["Profile_id"].isin(selected_parameters)]
 
+        # for lots
+        # Ensure 'Lot' column has only string values to avoid mismatches
+        filtered_df["Lot"] = filtered_df["Lot"].astype(str)
+        all_lots = sorted(filtered_df["Lot"].dropna().unique().tolist())
+        all_lots.insert(0, "All lots")
+        selected_lots = st.sidebar.multiselect("Select Lots", all_lots, default=["All lots"])
+        if "All lots" in selected_lots:
+            selected_lots = all_lots[1:]  # Exclude "All lots" from the selection
+        filtered_df = filtered_df[filtered_df["Lot"].isin(selected_lots)]
+
+        # for serial no
+        # Ensure 'Chip_serial_no' column is treated as a string to avoid mismatches
+        filtered_df["Chip_serial_no"] = filtered_df["Chip_serial_no"].astype(str)
+        all_series = sorted(filtered_df["Chip_serial_no"].dropna().unique().tolist())
+        all_series.insert(0, "All series")
+        selected_series = st.sidebar.multiselect("Select Series", all_series, default=["All series"])
+        if "All series" in selected_series:
+            selected_series = all_series[1:]  # Exclude "All series" from the selection
+        filtered_df = filtered_df[filtered_df["Chip_serial_no"].isin(selected_series)]
+
+
+
+        all_threshold = st.sidebar.number_input("Minimum 'All' Value", min_value=0, value=0)
+    
+
+
+        metric = "IND_per" if any(param in ["MTR", "INH"] for param in selected_parameters) else "INV_per"
+        status_col = "Indeterminate" if metric == "IND_per" else "Invalid"
+        
         index_columns = {
             "Lot Performance": ['Lot'],
             "Chip series": ['Chip_serial_no'],
@@ -116,16 +149,19 @@ def main():
         for tab, key in zip(tabs, index_columns.keys()):
             with tab:
                 pivot = filtered_df.pivot_table(index=index_columns[key], values='Patient_id', columns='Test_status', aggfunc='count', margins=True)
-                pivotdf = pd.DataFrame(pivot.to_records())
-                pivotdf.fillna(0, inplace=True)
-                if "Invalid" in pivotdf.columns and "All" in pivotdf.columns:
-                    pivotdf["INV_per"] = round(pivotdf["Invalid"] / pivotdf["All"] * 100, 2)
+                pivotdf = pd.DataFrame(pivot.to_records()).fillna(0)
+                if status_col in pivotdf.columns and "All" in pivotdf.columns:
+                    pivotdf[metric] = round(pivotdf[status_col] / pivotdf["All"] * 100, 2)
                 dataframes[key] = pivotdf
+                pivotdf = pivotdf[pivotdf['All'] > all_threshold]
+                if "All" in pivotdf.columns:
+                    pivotdf = pivotdf[pivotdf["All"] > all_threshold]  # Apply threshold filter only if column exists
+                else:
+                    st.warning("Column 'All' not found in pivot table. Check data consistency.")
+
                 st.dataframe(pivotdf)
 
-                pivotdf = pivotdf[pivotdf[index_columns[key][0]] != 'All']  # Remove rows where index is 'All'
-                    
-                    # Interactive graphs for each index column
+                # Interactive graphs for each index column
                 for index in index_columns[key]:
                     if index in pivotdf.columns and "INV_per" in pivotdf.columns:
                         avg_inv_per = pivotdf.groupby(index)["INV_per"].mean().reset_index()
@@ -133,12 +169,7 @@ def main():
                         st.plotly_chart(fig)
         
         excel_file = generate_excel(dataframes)
-        st.sidebar.download_button(
-            label="📥 Download Excel File",
-            data=excel_file,
-            file_name="data_export.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.sidebar.download_button("📥 Download Excel File", data=excel_file, file_name="data_export.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 if __name__ == "__main__":
     main()
