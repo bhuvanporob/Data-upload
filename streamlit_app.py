@@ -161,9 +161,9 @@ def main():
                     st.warning("Column 'All' not found in pivot table. Check data consistency.")
 
                 st.dataframe(pivotdf)
-                
+                pivotdf = pivotdf[pivotdf[index_columns[key][0]] != 'All']  # Remove rows where index is 'All'        
         # Create tabs
-        inv_tab, ct_tab = st.tabs(["INV_per", "Ct values"])
+        inv_tab, ct_tab, time_tab = st.tabs(["INV_per", "Ct values", "Time"])
 
         with inv_tab:
             # Define the columns to visualize
@@ -198,6 +198,44 @@ def main():
 
                 # Show plot in Streamlit with a unique key
                 st.plotly_chart(fig, key=f'key_{ct_col}_{i}')  # Ensure unique key for each chart
+
+        # ---- Time TAB ---- #
+        with time_tab:
+            if "Test_date_time" in filtered_df.columns and "Test_status" in filtered_df.columns:
+                # Convert 'Test_date_time' to datetime format
+                filtered_df["Test_date_time"] = pd.to_datetime(filtered_df["Test_date_time"], errors="coerce")
+
+                # Group data by time periods
+                time_period = st.selectbox("Select Time Period", ["Daily", "Weekly", "Monthly", "Yearly"])
+
+                # Define the time grouping
+                if time_period == "Daily":
+                    filtered_df["Period"] = filtered_df["Test_date_time"].dt.date
+                elif time_period == "Weekly":
+                    filtered_df["Period"] = filtered_df["Test_date_time"].dt.to_period("W").astype(str)
+                elif time_period == "Monthly":
+                    filtered_df["Period"] = filtered_df["Test_date_time"].dt.to_period("M").astype(str)
+                else:  # Yearly
+                    filtered_df["Period"] = filtered_df["Test_date_time"].dt.to_period("Y").astype(str)
+
+                # Calculate total and invalid test counts
+                test_counts = filtered_df.groupby("Period")["Test_status"].count().reset_index(name="Total_Tests")
+                invalid_counts = filtered_df[filtered_df["Test_status"] == "Invalid"].groupby("Period")["Test_status"].count().reset_index(name="Invalid_Tests")
+
+                # Merge both counts
+                time_grouped = test_counts.merge(invalid_counts, on="Period", how="left").fillna(0)
+
+                # Calculate invalid percentage
+                time_grouped["Invalid_Percentage"] = (time_grouped["Invalid_Tests"] / time_grouped["Total_Tests"]) * 100
+
+                # Create a line chart
+                fig = px.line(time_grouped, x="Period", y="Invalid_Percentage", markers=True, 
+                            title=f"Invalid Test Percentage Over Time ({time_period})",
+                            labels={"Period": time_period, "Invalid_Percentage": "Invalid Test Percentage (%)"})
+
+                # Show plot
+                st.plotly_chart(fig, use_container_width=True)
+
         excel_file = generate_excel(dataframes)
         st.sidebar.download_button("📥 Download Excel File", data=excel_file, file_name="data_export.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
