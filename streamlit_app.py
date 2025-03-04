@@ -163,19 +163,25 @@ def main():
                 st.dataframe(pivotdf)
                 pivotdf = pivotdf[pivotdf[index_columns[key][0]] != 'All']  # Remove rows where index is 'All'        
         # Create tabs
-        inv_tab, ct_tab, time_tab = st.tabs(["INV_per", "Ct values", "Time"])
+        inv_tab, ct_tab, time_tab = st.tabs(["INV_per/IND_per", "Ct values", "Time"])
 
         with inv_tab:
             # Define the columns to visualize
             columns_to_view = ['Zone', 'State', 'Account Owner', 'Customer Type', 'Lab_name', 
-                            'Truelab_id', 'Lot', 'Chip_batchno', 'Chip_serial_no']
+                                'Truelab_id', 'Lot', 'Chip_batchno', 'Chip_serial_no']
 
-            # Loop through the specified columns
-            for column in columns_to_view:
-                if column in pivotdf.columns and "INV_per" in pivotdf.columns:
-                    avg_inv_per = pivotdf.groupby(column)["INV_per"].mean().reset_index()
-                    fig = px.bar(avg_inv_per, x=column, y="INV_per", title=f"AVG INV_per Analysis - {column}")
-                    st.plotly_chart(fig, use_container_width=True)
+            # Check which column exists: "INV_per" or "IND_per"
+            inv_col = "INV_per" if "INV_per" in pivotdf.columns else "IND_per" if "IND_per" in pivotdf.columns else None
+
+            if inv_col:  # Proceed only if a valid column exists
+                for column in columns_to_view:
+                    if column in pivotdf.columns:
+                        avg_inv_per = pivotdf.groupby(column)[inv_col].mean().reset_index()
+                        fig = px.bar(avg_inv_per, x=column, y=inv_col, title=f"AVG {inv_col} Analysis - {column}")
+                        st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Neither 'INV_per' nor 'IND_per' exists in the dataset.")
+
         # Content for "Ct values" tab
         with ct_tab:
             # Convert Ct1, Ct2, Ct3 to numeric and replace non-numeric values with 0
@@ -218,23 +224,35 @@ def main():
                 else:  # Yearly
                     filtered_df["Period"] = filtered_df["Test_date_time"].dt.to_period("Y").astype(str)
 
-                # Calculate total and invalid test counts
+                # Calculate total test count
                 test_counts = filtered_df.groupby("Period")["Test_status"].count().reset_index(name="Total_Tests")
-                invalid_counts = filtered_df[filtered_df["Test_status"] == "Invalid"].groupby("Period")["Test_status"].count().reset_index(name="Invalid_Tests")
 
-                # Merge both counts
-                time_grouped = test_counts.merge(invalid_counts, on="Period", how="left").fillna(0)
+                # Determine if "Invalid" or "Indeterminate" exists
+                status_to_check = None
+                if "Invalid" in filtered_df["Test_status"].unique():
+                    status_to_check = "Invalid"
+                elif "Indeterminate" in filtered_df["Test_status"].unique():
+                    status_to_check = "Indeterminate"
 
-                # Calculate invalid percentage
-                time_grouped["Invalid_Percentage"] = (time_grouped["Invalid_Tests"] / time_grouped["Total_Tests"]) * 100
+                if status_to_check:
+                    # Calculate specific status count
+                    status_counts = filtered_df[filtered_df["Test_status"] == status_to_check] \
+                        .groupby("Period")["Test_status"].count().reset_index(name=f"{status_to_check}_Tests")
 
-                # Create a line chart
-                fig = px.line(time_grouped, x="Period", y="Invalid_Percentage", markers=True, 
-                            title=f"Invalid Test Percentage Over Time ({time_period})",
-                            labels={"Period": time_period, "Invalid_Percentage": "Invalid Test Percentage (%)"})
+                    # Merge with total tests
+                    time_grouped = test_counts.merge(status_counts, on="Period", how="left").fillna(0)
 
-                # Show plot
-                st.plotly_chart(fig, use_container_width=True)
+                    # Calculate percentage
+                    time_grouped[f"{status_to_check}_Percentage"] = (time_grouped[f"{status_to_check}_Tests"] / time_grouped["Total_Tests"]) * 100
+
+                    # Create line chart
+                    fig = px.line(time_grouped, x="Period", y=f"{status_to_check}_Percentage", markers=True, 
+                                title=f"{status_to_check} Test Percentage Over Time ({time_period})",
+                                labels={"Period": time_period, f"{status_to_check}_Percentage": f"{status_to_check} Test Percentage (%)"})
+
+                    # Show plot
+                    st.plotly_chart(fig, use_container_width=True)
+
 
         excel_file = generate_excel(dataframes)
         st.sidebar.download_button("📥 Download Excel File", data=excel_file, file_name="data_export.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
