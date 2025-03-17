@@ -63,6 +63,7 @@ def clean_data(df):
     df_clean['Ct1'] = pd.to_numeric(df_clean['Ct1'], errors='coerce').fillna(0)
     df_clean['Ct2'] = pd.to_numeric(df_clean['Ct2'], errors='coerce').fillna(0)
     df_clean['Ct3'] = pd.to_numeric(df_clean['Ct3'], errors='coerce').fillna(0)
+    df_clean['Chip_serial_no'] = df_clean['Chip_serial_no'].astype(str)
     df_clean = df_clean[~df_clean['Chip_serial_no'].str[0].str.isdigit()]
     df_clean = df_clean[df_clean['Chip_serial_no'].str[1].str.isdigit()]
     masterlist = pd.read_excel('Feb Materlist.xlsx',sheet_name='Main data')
